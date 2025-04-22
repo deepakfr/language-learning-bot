@@ -1,144 +1,155 @@
 import streamlit as st
-import openai
-import re
-from db import save_verdict, get_recent_verdicts
+import sqlite3
+import requests
+from datetime import datetime
 
-# ✅ Groq API credentials
-openai.api_key = st.secrets["GROQ_API_KEY"]
-openai.api_base = "https://api.groq.com/openai/v1"
+# Load API key from secrets
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 
-# 🧠 Analyze conflict using Groq
-def analyze_conflict(user1_input, user2_input, theme, user1_name, user2_name):
-    system_prompt = (
-        f"You are JudgeBot, an unbiased AI judge for {theme.lower()} conflicts. "
-        "Analyze both sides, highlight key points, and give a fair verdict. "
-        "Clearly state who is more reasonable and provide a win percentage (e.g., 60% vs 40%)."
-    )
+# -- Page Config
+st.set_page_config(page_title="🌐 Deep Language Learning Chatbot", layout="centered")
+st.title("🌐 Language Learning Chatbot")
+st.markdown("Practice any language with an AI chatbot. Get real-time feedback and track your mistakes.Blended by deepak labs")
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {
-            "role": "user",
-            "content": f"{user1_name} says:\n{user1_input}\n\n"
-                       f"{user2_name} says:\n{user2_input}\n\n"
-                       f"Who is more reasonable and why? Show the win percentage too.",
-        },
-    ]
+# --- DB Setup ---
+def init_db():
+    conn = sqlite3.connect("mistakes.db")
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS mistakes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_input TEXT,
+            corrected_output TEXT,
+            error_type TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def log_mistake(user_input, corrected_output, error_type):
+    conn = sqlite3.connect("mistakes.db")
+    c = conn.cursor()
+    c.execute("INSERT INTO mistakes (user_input, corrected_output, error_type) VALUES (?, ?, ?)",
+              (user_input, corrected_output, error_type))
+    conn.commit()
+    conn.close()
+
+def get_mistakes_summary():
+    conn = sqlite3.connect("mistakes.db")
+    c = conn.cursor()
+    c.execute("SELECT error_type, COUNT(*) FROM mistakes GROUP BY error_type")
+    results = c.fetchall()
+    conn.close()
+    return results
+
+# --- Groq Chat Completion ---
+def groq_chat(prompt):
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "llama3-8b-8192",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.5
+    }
+    response = requests.post(url, headers=headers, json=payload)
 
     try:
-        response = openai.ChatCompletion.create(
-            model="llama3-8b-8192",
-            messages=messages,
-            temperature=0.7,
-        )
-        return response.choices[0].message.content
+        result = response.json()
+        return result["choices"][0]["message"]["content"]
     except Exception as e:
-        return f"❌ Error: {e}"
+        return f"Error: {e}"
 
-# 📊 Extract win percentages from JudgeBot's response
-def extract_percentages(verdict_text):
-    match = re.findall(r"(\b\d{1,3})%", verdict_text)
-    if len(match) >= 2:
-        p1, p2 = int(match[0]), int(match[1])
-        return p1, p2
-    return None, None
+# --- Initialization ---
+init_db()
 
-# 📤 Generate WhatsApp Link
-def generate_whatsapp_link(phone_number, message):
-    phone_number = phone_number.replace("+", "").replace("-", "").replace(" ", "")
-    message = message.replace(" ", "%20").replace("\n", "%0A")
-    return f"https://wa.me/{phone_number}?text={message}"
+# --- Sidebar for Settings ---
+with st.sidebar:
+    st.header("Language Setup")
+    known_lang = st.text_input("Your known language", "English")
+    target_lang = st.text_input("Language you want to learn", "Spanish")
+    level = st.selectbox("Your level", ["Beginner", "Intermediate", "Advanced"])
 
-# 📤 Generate Email Link
-def generate_mailto_link(email, subject, body):
-    subject = subject.replace(" ", "%20")
-    body = body.replace(" ", "%20").replace("\n", "%0A")
-    return f"mailto:{email}?subject={subject}&body={body}"
+    if st.button("Reset Chat"):
+        st.session_state.chat_history = []
+        st.success("Conversation reset.")
 
-# 💬 Conflict Interface
-def show_interface(theme):
-    st.subheader(f"{theme} Conflict Arbitration ⚖️")
-    st.write("Describe the conflict from both perspectives. JudgeBot will decide fairly.")
+# --- Session state for memory ---
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
-    with st.form(key="conflict_form"):
-        user1_name = st.text_input("🧑 User 1: Name", key="user1_name")
-        user2_name = st.text_input("👩 User 2: Name", key="user2_name")
-        contact_email = st.text_input("📧 Email of User 2 (optional)")
-        contact_phone = st.text_input("📱 WhatsApp Number of User 2 (optional, with country code)")
-        user1_input = st.text_area("🧑 User 1: Your version", key="user1_input")
-        user2_input = st.text_area("👩 User 2: Your version", key="user2_input")
-        submit = st.form_submit_button("🧠 Get Verdict from JudgeBot")
+# --- Chat Interface ---
+st.subheader("Start chatting in your target language:")
 
-    if submit:
-        if not all([user1_name, user2_name, user1_input, user2_input]):
-            st.warning("Please enter both names and both sides of the conflict.")
-            return
+# --- History Toggle ---
+show_history = st.checkbox("📜 Show History", value=False)
 
-        with st.spinner("JudgeBot is thinking..."):
-            verdict = analyze_conflict(user1_input, user2_input, theme, user1_name, user2_name)
-            save_verdict(theme, user1_name, user2_name, user1_input, user2_input, verdict)
+# --- User Input ---
+user_input = st.text_area("✍️ Enter your message:", "", height=100)
+send_btn = st.button("Send")
 
-        # 🎯 Show current verdict only
-        st.success("✅ Verdict delivered!")
-        st.markdown("### 🧑‍⚖️ JudgeBot says:")
-        st.markdown(verdict)
+if send_btn and user_input.strip() != "":
+    # Chatbot prompt (contextualized)
+    context = f"""You are a friendly and supportive language tutor.
+You are chatting in {target_lang} with a user who speaks {known_lang} and is at a {level} level.
+Keep the conversation flowing, correct mistakes gently if needed, and encourage the user.
 
-        # Percentages
-        p1, p2 = extract_percentages(verdict)
-        if p1 is not None and p2 is not None:
-            st.markdown("### 🏆 Victory Margin")
-            st.progress(p1 / 100.0, f"{user1_name}: {p1}%")
-            st.progress(p2 / 100.0, f"{user2_name}: {p2}%")
-        else:
-            st.info("Could not extract win percentages. Try rephrasing the prompt.")
+User says: {user_input}
+Respond in {target_lang}:"""
 
-        # Share
-        if contact_email or contact_phone:
-            st.markdown("### 📤 Share the Verdict")
-            prefilled_message = f"""Hello {user2_name},
+    bot_response = groq_chat(context)
 
-JudgeBot has delivered a verdict on your conflict with {user1_name}.
+    # Log chat
+    st.session_state.chat_history.append(("You", user_input))
+    st.session_state.chat_history.append(("Bot", bot_response))
 
-📜 Verdict:
-{verdict}
+    # --- Error detection ---
+    correction_prompt = f"""Here is a sentence by a {target_lang} learner:
+"{user_input}"
 
-Visit the app to respond or review more: http://localhost:8501
+If there are any mistakes, correct them and specify the type (grammar, vocab, syntax).
+If correct, say "No mistakes found.".
+Respond in {known_lang}."""
 
-🤖 Sent via FairFight AI
-"""
-            if contact_phone:
-                wa_link = generate_whatsapp_link(contact_phone, prefilled_message)
-                st.markdown(f"[📲 Send via WhatsApp]({wa_link})", unsafe_allow_html=True)
+    correction_result = groq_chat(correction_prompt)
 
-            if contact_email:
-                mail_link = generate_mailto_link(contact_email, f"JudgeBot Verdict for {theme}", prefilled_message)
-                st.markdown(f"[📧 Send via Email]({mail_link})", unsafe_allow_html=True)
+    if "No mistakes" not in correction_result:
+        log_mistake(user_input, correction_result, "language mistake")
+        st.session_state.chat_history.append(("Correction", correction_result))
 
-# 🏠 App main
-def main():
-    st.set_page_config(page_title="FairFight AI", page_icon="⚖️")
-    st.title("🤖 FairFight AI")
-    st.caption("Because every conflict deserves a fair verdict.")
+# --- Display most recent interaction only ---
+if st.session_state.chat_history:
+    last_messages = st.session_state.chat_history[-3:]  # You, Bot, Correction (if exists)
+    for role, text in last_messages:
+        if role == "You":
+            st.markdown(f"**🧑 You:** {text}")
+        elif role == "Bot":
+            st.markdown(f"**🤖 Bot:** {text}")
+        elif role == "Correction":
+            st.markdown(f"⚠️ **Correction:** {text}")
 
-    # Tabs layout: Main & History
-    tab = st.sidebar.radio("🗂 Menu", ["🧠 New Verdict", "📜 Verdict History"])
+# --- Optional full history ---
+if show_history and len(st.session_state.chat_history) > 3:
+    st.markdown("---")
+    st.subheader("🕘 Full Conversation History")
+    for role, text in st.session_state.chat_history[:-3]:
+        if role == "You":
+            st.markdown(f"**🧑 You:** {text}")
+        elif role == "Bot":
+            st.markdown(f"**🤖 Bot:** {text}")
+        elif role == "Correction":
+            st.markdown(f"⚠️ **Correction:** {text}")
 
-    if tab == "🧠 New Verdict":
-        theme = st.selectbox("Choose a conflict type:", ["Couple 💔", "Friends 🎭", "Pro 👨‍💼"])
-        show_interface(theme.split()[0])
-
-    elif tab == "📜 Verdict History":
-        st.sidebar.write("🔄 Refresh to update list.")
-        verdicts = get_recent_verdicts()
-        st.subheader("🧾 Past Verdicts")
-        if verdicts:
-            for row in verdicts:
-                with st.expander(f"⚖️ {row['theme']} - {row['user1_name']} vs {row['user2_name']} ({row['created_at']})"):
-                    st.markdown(f"**🧑 {row['user1_name']} says:**\n{row['user1_input']}")
-                    st.markdown(f"**👩 {row['user2_name']} says:**\n{row['user2_input']}")
-                    st.markdown(f"**Verdict:**\n{row['verdict']}")
-        else:
-            st.info("No verdicts found yet.")
-
-if __name__ == "__main__":
-    main()
+# --- Mistake Summary ---
+st.markdown("---")
+if st.button("📊 Show Mistake Summary"):
+    summary = get_mistakes_summary()
+    if summary:
+        st.subheader("Common Mistakes:")
+        for error_type, count in summary:
+            st.markdown(f"- **{error_type}**: {count} time(s)")
+    else:
+        st.info("No mistakes logged yet.")
