@@ -1,0 +1,4 @@
+streamlit
+streamlit-webrtc
+requests
+fpdf
