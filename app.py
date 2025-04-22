@@ -65,33 +65,6 @@ def groq_chat(prompt):
     except Exception as e:
         return f"Error: {e}"
 
-# --- PDF Generator ---
-
-
-def generate_pdf(chat_history):
-    pdf = FPDF()
-    pdf.add_page()
-    
-    # Set a font that supports Unicode
-    pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
-    pdf.set_font("DejaVu", size=12)
-    
-    for role, text in chat_history:
-        label = {
-            "You": "🧑 You",
-            "Bot": "🤖 Bot",
-            "Correction": "⚠️ Correction"
-        }.get(role, role)
-        pdf.multi_cell(0, 10, f"{label}: {text}")
-        pdf.ln()
-
-    pdf_output = BytesIO()
-    pdf.output(pdf_output)
-    pdf_output.seek(0)
-    return pdf_output
-
-# --- Initialization ---
-init_db()
 
 # --- Sidebar for Settings ---
 with st.sidebar:
@@ -165,8 +138,4 @@ if st.button("📊 Show Mistake Summary"):
     else:
         st.info("No mistakes logged yet.")
 
-# --- Export Chat to PDF ---
-st.markdown("---")
-if st.button("📄 Export Chat as PDF"):
-    pdf_data = generate_pdf(st.session_state.chat_history)
-    st.download_button("⬇️ Download Chat History", data=pdf_data, file_name="chat_history.pdf", mime="application/pdf")
+
