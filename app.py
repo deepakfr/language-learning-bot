@@ -2,14 +2,16 @@ import streamlit as st
 import sqlite3
 import requests
 from datetime import datetime
+from fpdf import FPDF
+from io import BytesIO
 
 # Load API key from secrets
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 
 # -- Page Config
 st.set_page_config(page_title="🌐 Language Learning Chatbot", layout="centered")
-st.title("🌐 LANGBO Language Learning Chatbot")
-st.markdown("Practice any language with an AI chatbot. Get real-time feedback and track your mistakes. Blended by deepak labs")
+st.title("🌐 Language Learning Chatbot")
+st.markdown("Practice any language with an AI chatbot. Get real-time feedback and track your mistakes.")
 
 # --- DB Setup ---
 def init_db():
@@ -62,6 +64,24 @@ def groq_chat(prompt):
         return result["choices"][0]["message"]["content"]
     except Exception as e:
         return f"Error: {e}"
+
+# --- PDF Generator ---
+def generate_pdf(chat_history):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    for role, text in chat_history:
+        label = {
+            "You": "🧑 You",
+            "Bot": "🤖 Bot",
+            "Correction": "⚠️ Correction"
+        }.get(role, role)
+        pdf.multi_cell(0, 10, f"{label}: {text}")
+        pdf.ln()
+    pdf_output = BytesIO()
+    pdf.output(pdf_output)
+    pdf_output.seek(0)
+    return pdf_output
 
 # --- Initialization ---
 init_db()
@@ -137,3 +157,9 @@ if st.button("📊 Show Mistake Summary"):
             st.markdown(f"- **{error_type}**: {count} time(s)")
     else:
         st.info("No mistakes logged yet.")
+
+# --- Export Chat to PDF ---
+st.markdown("---")
+if st.button("📄 Export Chat as PDF"):
+    pdf_data = generate_pdf(st.session_state.chat_history)
+    st.download_button("⬇️ Download Chat History", data=pdf_data, file_name="chat_history.pdf", mime="application/pdf")
