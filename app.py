@@ -1,11 +1,15 @@
 import streamlit as st
 import sqlite3
 import requests
+import os
 from datetime import datetime
 from fpdf import FPDF
 from io import BytesIO
 
-# Load API key from secrets
+# --- DB Path Fix for Streamlit Cloud ---
+DB_PATH = os.path.join(os.path.expanduser("~"), "mistakes.db")
+
+# --- Load API Key ---
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 
 # -- Page Config
@@ -15,7 +19,7 @@ st.markdown("Practice any language with an AI chatbot. Get real-time feedback an
 
 # --- DB Setup ---
 def init_db():
-    conn = sqlite3.connect("mistakes.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''
         CREATE TABLE IF NOT EXISTS mistakes (
@@ -29,16 +33,21 @@ def init_db():
     conn.commit()
     conn.close()
 
+init_db()
+
 def log_mistake(user_input, corrected_output, error_type):
-    conn = sqlite3.connect("mistakes.db")
-    c = conn.cursor()
-    c.execute("INSERT INTO mistakes (user_input, corrected_output, error_type) VALUES (?, ?, ?)",
-              (user_input, corrected_output, error_type))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("INSERT INTO mistakes (user_input, corrected_output, error_type) VALUES (?, ?, ?)",
+                  (user_input, corrected_output, error_type))
+        conn.commit()
+        conn.close()
+    except sqlite3.OperationalError as e:
+        st.error(f"Database error: {e}")
 
 def get_mistakes_summary():
-    conn = sqlite3.connect("mistakes.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT error_type, COUNT(*) FROM mistakes GROUP BY error_type")
     results = c.fetchall()
@@ -65,8 +74,7 @@ def groq_chat(prompt):
     except Exception as e:
         return f"Error: {e}"
 
-
-# --- Sidebar for Settings ---
+# --- Sidebar ---
 with st.sidebar:
     st.header("Language Setup")
     known_lang = st.text_input("Your known language", "English")
@@ -77,18 +85,17 @@ with st.sidebar:
         st.session_state.chat_history = []
         st.success("Conversation reset.")
 
-# --- Session state for memory ---
+# --- Session State ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# --- Chat Interface ---
+# --- Chat Input ---
 st.subheader("Start chatting in your target language:")
-
 user_input = st.text_area("✍️ Enter your message:", "", height=100)
 send_btn = st.button("Send")
 
 if send_btn and user_input.strip() != "":
-    # Chatbot prompt (contextualized)
+    # Build contextual prompt
     context = f"""You are a friendly and supportive language tutor.
 You are chatting in {target_lang} with a user who speaks {known_lang} and is at a {level} level.
 Keep the conversation flowing, correct mistakes gently if needed, and encourage the user.
@@ -102,7 +109,7 @@ Respond in {target_lang}:"""
     st.session_state.chat_history.append(("You", user_input))
     st.session_state.chat_history.append(("Bot", bot_response))
 
-    # --- Error detection ---
+    # --- Correction ---
     correction_prompt = f"""Here is a sentence by a {target_lang} learner:
 "{user_input}"
 
@@ -116,7 +123,7 @@ Respond in {known_lang}."""
         log_mistake(user_input, correction_result, "language mistake")
         st.session_state.chat_history.append(("Correction", correction_result))
 
-# --- Display most recent interaction only ---
+# --- Display last interaction ---
 if st.session_state.chat_history:
     last_messages = st.session_state.chat_history[-3:]  # You, Bot, Correction (if exists)
     for role, text in last_messages:
@@ -127,7 +134,7 @@ if st.session_state.chat_history:
         elif role == "Correction":
             st.markdown(f"⚠️ **Correction:** {text}")
 
-# --- Mistake Summary ---
+# --- Summary ---
 st.markdown("---")
 if st.button("📊 Show Mistake Summary"):
     summary = get_mistakes_summary()
@@ -137,5 +144,3 @@ if st.button("📊 Show Mistake Summary"):
             st.markdown(f"- **{error_type}**: {count} time(s)")
     else:
         st.info("No mistakes logged yet.")
-
-
