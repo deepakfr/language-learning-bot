@@ -10,8 +10,8 @@ GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 
 # -- Page Config
 st.set_page_config(page_title="🌐 Language Learning Chatbot", layout="centered")
-st.title("🌐 Language Learning Chatbot")
-st.markdown("Practice any language with an AI chatbot. Get real-time feedback and track your mistakes.")
+st.title("🌐 Deep Language Learning Chatbot")
+st.markdown("Practice any language with an AI chatbot. Get real-time feedback and track your mistakes. Blended by deepak labs")
 
 # --- DB Setup ---
 def init_db():
@@ -66,10 +66,16 @@ def groq_chat(prompt):
         return f"Error: {e}"
 
 # --- PDF Generator ---
+
+
 def generate_pdf(chat_history):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", size=12)
+    
+    # Set a font that supports Unicode
+    pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+    pdf.set_font("DejaVu", size=12)
+    
     for role, text in chat_history:
         label = {
             "You": "🧑 You",
@@ -78,6 +84,7 @@ def generate_pdf(chat_history):
         }.get(role, role)
         pdf.multi_cell(0, 10, f"{label}: {text}")
         pdf.ln()
+
     pdf_output = BytesIO()
     pdf.output(pdf_output)
     pdf_output.seek(0)
