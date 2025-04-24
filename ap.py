@@ -6,7 +6,6 @@ from datetime import datetime
 from fpdf import FPDF
 from io import BytesIO
 from gtts import gTTS
-from streamlit_speech_recognition import speech_to_text
 import tempfile
 
 # --- DB Path Fix for Streamlit Cloud ---
@@ -105,13 +104,9 @@ with st.sidebar:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# --- Chat Input (Voice + Text) ---
-st.subheader("🎙️ Talk or type in your target language:")
-
-user_input_voice = speech_to_text(language=target_lang[:2].lower())
-user_input_text = st.text_area("Or type here:", "", height=100)
-
-user_input = user_input_voice if user_input_voice else user_input_text
+# --- Chat Input (Text Only) ---
+st.subheader("✍️ Type in your target language:")
+user_input = st.text_area("Your message:", "", height=100)
 send_btn = st.button("Send")
 
 if send_btn and user_input.strip() != "":
