@@ -3,3 +3,4 @@ streamlit-webrtc
 requests
 fpdf
 fpdf2
+gtts
