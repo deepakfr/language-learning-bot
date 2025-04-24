@@ -79,6 +79,34 @@ def groq_chat(prompt):
     except Exception as e:
         return f"Error: {e}"
 
+# --- Export to PDF with Unicode Support ---
+def export_chat_to_pdf(chat_history):
+    pdf = FPDF()
+    pdf.add_page()
+
+    font_url = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf"
+    font_path = "/tmp/DejaVuSans.ttf"
+    if not os.path.exists(font_path):
+        with open(font_path, "wb") as f:
+            f.write(requests.get(font_url).content)
+
+    pdf.add_font("DejaVu", "", font_path, uni=True)
+    pdf.set_font("DejaVu", "", 12)
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    pdf.cell(200, 10, txt="🧠 Language Learning Chat History", ln=True, align="C")
+    pdf.ln(10)
+
+    for role, message in chat_history:
+        label = "🧑 You" if role == "You" else "🤖 Bot" if role == "Bot" else "⚠️ Correction"
+        pdf.multi_cell(0, 10, f"{label}: {message}")
+        pdf.ln(2)
+
+    buffer = BytesIO()
+    pdf.output(buffer)
+    buffer.seek(0)
+    return buffer
+
 # --- Sidebar ---
 with st.sidebar:
     st.header("🌍 Language Setup")
@@ -107,30 +135,39 @@ with st.sidebar:
         st.markdown("---")
         st.subheader("📄 Export")
         if st.button("📥 Download PDF"):
-            buffer = BytesIO()
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", size=12)
-            pdf.cell(200, 10, txt="Language Learning Chat", ln=True, align="C")
-            pdf.ln(10)
-            for role, msg in st.session_state.chat_history:
-                label = "🧑 You" if role == "You" else "🤖 Bot" if role == "Bot" else "⚠️ Correction"
-                pdf.multi_cell(0, 10, f"{label}: {msg}")
-                pdf.ln(2)
-            pdf.output(buffer)
-            buffer.seek(0)
-            st.download_button("📄 Download Chat History", buffer, file_name="chat_history.pdf")
+            pdf_buffer = export_chat_to_pdf(st.session_state.chat_history)
+            st.download_button("📄 Download Chat History", data=pdf_buffer, file_name="chat_history.pdf", mime="application/pdf")
 
 # --- Session State ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# --- Voice Input ---
-st.subheader("🎙️ Speak in your language or type below:")
-voice_input = streamlit_js_eval(js_expressions="window.prompt('🎤 Speak your sentence aloud then click OK')", key="voice")
-text_input = st.text_area("Or type your message here:", "", height=100)
+# --- Voice Input with Button ---
+st.subheader("🎙️ Tap to speak or type your sentence")
+speak = st.button("🎤 Tap to Speak")
 
-user_input = voice_input if voice_input else text_input
+voice_input = ""
+if speak:
+    voice_input = streamlit_js_eval(
+        js_expressions="""
+        new Promise((resolve) => {
+          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+          if (!SpeechRecognition) {
+            resolve("SpeechRecognition not supported");
+            return;
+          }
+          const recognition = new SpeechRecognition();
+          recognition.lang = 'en-US';
+          recognition.onresult = (event) => resolve(event.results[0][0].transcript);
+          recognition.onerror = () => resolve("Could not recognize speech");
+          recognition.start();
+        })
+        """,
+        key="real_speech"
+    )
+
+text_input = st.text_area("Or type your message here:", "", height=100)
+user_input = voice_input if voice_input and "not supported" not in voice_input else text_input
 
 # --- Send Button ---
 if st.button("Translate & Speak") and user_input.strip():
