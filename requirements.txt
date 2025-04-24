@@ -4,3 +4,4 @@ requests
 fpdf
 fpdf2
 gtts
+streamlit-js-eval
